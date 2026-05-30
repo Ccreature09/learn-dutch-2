@@ -11,8 +11,11 @@ import {
 } from "@/lib/modules/error-correction";
 import RuleResultDisplay from "@/components/RuleResultDisplay";
 import { validateSentence } from "@/lib/grammar/engine";
+import { useLearnerStore } from "@/lib/modules/learner-store";
+import { classifyExerciseErrorType } from "@/lib/utils/error-classifier";
 
 export default function ErrorCorrection() {
+  const { recordMistake, recordAttempt } = useLearnerStore();
   const [exercises, setExercises] = useState<ErrorCorrectionExercise[]>([]);
   const [exerciseIndex, setExerciseIndex] = useState(0);
   const [userAnswer, setUserAnswer] = useState("");
@@ -45,6 +48,16 @@ export default function ErrorCorrection() {
     // Also get detailed rule results for display
     const validation = validateSentence(userAnswer);
     setRuleResults(validation.ruleResults);
+    // Record to learner store
+    recordAttempt();
+    if (!result.isCorrect) {
+      recordMistake({
+        exerciseType: "error_correction",
+        errorCategories: [classifyExerciseErrorType(exercise.errorType)],
+        userInput: userAnswer,
+        correctAnswer: exercise.correctSentence,
+      });
+    }
   }
 
   function next() {

@@ -43,32 +43,38 @@ export function translateEnToDutch(english: string): TranslationResult {
     };
   }
 
-  // 2. Partial / fuzzy match — find sentences with overlapping keywords
+  // 2. Keyword-scored fuzzy match
   const keywords = normalised.split(" ").filter((w) => w.length > 3);
-  const fuzzyMatches = SENTENCE_TEMPLATES.filter((s) => {
-    const eng = s.english.toLowerCase();
-    return keywords.some((kw) => eng.includes(kw));
-  });
+  if (keywords.length > 0) {
+    const scored = SENTENCE_TEMPLATES
+      .map((s) => {
+        const eng = s.english.toLowerCase();
+        const matchCount = keywords.filter((kw) => eng.includes(kw)).length;
+        return { s, matchCount };
+      })
+      .filter(({ matchCount }) => matchCount > 0)
+      .sort((a, b) => b.matchCount - a.matchCount);
 
-  if (fuzzyMatches.length > 0) {
-    const best = fuzzyMatches[0];
-    return {
-      input: english,
-      direction: "en_to_nl",
-      mostNatural: best.dutch,
-      alternatives: [
-        ...best.alternatives.map((a) => ({ text: a.dutch, note: a.note })),
-        ...fuzzyMatches
-          .slice(1, 3)
-          .map((s) => ({ text: s.dutch, note: "Similar sentence structure" })),
-      ],
-      confidence: "medium",
-      grammarNotes: [
-        "This is a similar but not exact match. Verify the translation fits your context.",
-        ...best.grammaticalNotes,
-      ],
-      wordGloss: buildWordGloss(best.dutch),
-    };
+    if (scored.length > 0) {
+      const best = scored[0].s;
+      return {
+        input: english,
+        direction: "en_to_nl",
+        mostNatural: best.dutch,
+        alternatives: [
+          ...best.alternatives.map((a) => ({ text: a.dutch, note: a.note })),
+          ...scored
+            .slice(1, 3)
+            .map(({ s }) => ({ text: s.dutch, note: "Similar sentence structure" })),
+        ],
+        confidence: "medium",
+        grammarNotes: [
+          "This is a similar but not exact match. Verify the translation fits your context.",
+          ...best.grammaticalNotes,
+        ],
+        wordGloss: buildWordGloss(best.dutch),
+      };
+    }
   }
 
   // 3. Word-by-word gloss as fallback
@@ -149,12 +155,21 @@ function buildEnglishToNLGloss(english: string): {
   sentence: string;
   gloss: { word: string; translation: string }[];
 } {
-  // Simple word lookup — build reverse vocab map
+  // Build a reverse vocab map that accumulates ALL Dutch candidates per English word.
+  // Use the highest-priority candidate (same priority scheme as VOCAB_LOOKUP).
   const reverseVocab: Record<string, string> = {};
+  const reversePriority: Record<string, number> = {};
+
+  // Simple priority: prefer shorter, higher-frequency Dutch words
   Object.entries(VOCAB_LOOKUP).forEach(([dutch, entry]) => {
     const engWords = entry.english.toLowerCase().split(" / ");
+    const entryPriority = (entry.frequency === "high" ? 3 : entry.frequency === "medium" ? 2 : 1);
     engWords.forEach((e) => {
-      reverseVocab[e.trim()] = dutch;
+      const key = e.trim();
+      if (!reverseVocab[key] || entryPriority > (reversePriority[key] ?? 0)) {
+        reverseVocab[key] = dutch;
+        reversePriority[key] = entryPriority;
+      }
     });
   });
 

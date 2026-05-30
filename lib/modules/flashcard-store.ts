@@ -23,7 +23,7 @@ import { DUTCH_VOCABULARY } from "@/lib/data/vocabulary";
 const DEFAULT_INTERVAL = 5;
 const MAX_INTERVAL = 100;
 const MIN_INTERVAL = 2;
-const WRONG_REINSERT_POS = 3;
+const WRONG_REINSERT_POS = 5;
 
 function getDifficultyForVocabularyCard(frequency: "high" | "medium" | "low"): Difficulty {
   if (frequency === "high") return "beginner";
@@ -66,15 +66,24 @@ function buildDefaultCards(): FlashCard[] {
     });
   }
 
+  const seenVocabIds = new Set<string>();
   for (const word of DUTCH_VOCABULARY) {
-    if (word.pos === "article" || word.isObjectPronoun || word.frequency === "low") {
+    if (word.pos === "article" || word.isObjectPronoun) {
       continue;
     }
 
+    const id = `vocab-${word.dutch}-${word.pos}-${word.english}`;
+    if (seenVocabIds.has(id)) continue;
+    seenVocabIds.add(id);
+
     const difficulty = getDifficultyForVocabularyCard(word.frequency);
+    // Show article on the front for nouns so learners see "de man" / "het huis"
+    const front = word.pos === "noun" && word.gender
+      ? `${word.gender} ${word.dutch}`
+      : word.dutch;
     cards.push({
-      id: `vocab-${word.dutch}-${word.pos}-${word.english}`,
-      front: word.dutch,
+      id,
+      front,
       back: word.english,
       category: word.pos,
       tags: [word.pos, difficulty, ...(word.category ?? [])],
@@ -110,6 +119,19 @@ function buildDefaultCards(): FlashCard[] {
 }
 
 // ── Zustand Store ─────────────────────────────────────────────
+
+// Shape of what we actually write to localStorage.
+// We intentionally do NOT persist the full cards array — the deck is
+// always rebuilt from DUTCH_VERBS + DUTCH_VOCABULARY on startup so
+// vocabulary additions appear automatically without any migration work.
+type PersistedSRS = {
+  srs: Record<string, {
+    timesReviewed: number;
+    timesCorrect: number;
+    reviewInterval: number;
+    lastReviewed: number | null;
+  }>;
+};
 
 interface FlashcardState {
   cards: FlashCard[];
@@ -192,15 +214,26 @@ export const useFlashcardStore = create<FlashcardState>()(
             queue.splice(pos, 0, id);
           }
 
+          // Infinite mode: when the queue empties, shuffle the done pile back in.
+          if (queue.length === 0 && done.length > 0) {
+            const recycled = [...done];
+            for (let i = recycled.length - 1; i > 0; i--) {
+              const j = Math.floor(Math.random() * (i + 1));
+              [recycled[i], recycled[j]] = [recycled[j], recycled[i]];
+            }
+            return { cards, sessionQueue: recycled, sessionDone: [], sessionTotal: recycled.length };
+          }
+
           return { cards, sessionQueue: queue, sessionDone: done };
         });
       },
 
-      startSession: (count = 20, difficulty, category) => {
+      startSession: (count, difficulty, category) => {
         const { cards } = get();
         let pool = [...cards];
         if (difficulty) pool = pool.filter((c) => c.difficulty === difficulty);
-        if (category) pool = pool.filter((c) => c.category === category);
+        if (category === "__mine__") pool = pool.filter((c) => c.isUserCreated);
+        else if (category) pool = pool.filter((c) => c.category === category);
 
         // New cards first, then least-accurate
         pool.sort((a, b) => {
@@ -211,7 +244,8 @@ export const useFlashcardStore = create<FlashcardState>()(
           return aRate - bRate;
         });
 
-        const selected = pool.slice(0, count);
+        // Use all available cards in the pool (count param ignored)
+        const selected = pool;
         // Shuffle selected cards
         for (let i = selected.length - 1; i > 0; i--) {
           const j = Math.floor(Math.random() * (i + 1));
@@ -266,8 +300,31 @@ export const useFlashcardStore = create<FlashcardState>()(
       },
     }),
     {
-      name: "dutch-flashcards-v2",
-      partialize: (s) => ({ cards: s.cards }),
+      // Key bumped to v3 — clears the old full-cards snapshot from localStorage.
+      // Going forward only SRS progress is persisted; the deck is rebuilt from
+      // source on every load and the saved progress is merged back in.
+      name: "dutch-flashcards-v3",
+      partialize: (s): PersistedSRS => ({
+        srs: Object.fromEntries(
+          s.cards.map((c) => [
+            c.id,
+            {
+              timesReviewed: c.timesReviewed,
+              timesCorrect:  c.timesCorrect,
+              reviewInterval: c.reviewInterval,
+              lastReviewed:  c.lastReviewed,
+            },
+          ])
+        ),
+      }),
+      merge: (persisted, current) => {
+        const srs = ((persisted as PersistedSRS | null)?.srs) ?? {};
+        const cards = buildDefaultCards().map((c) => {
+          const p = srs[c.id];
+          return p ? { ...c, ...p } : c;
+        });
+        return { ...(current as FlashcardState), cards };
+      },
     },
   ),
 );

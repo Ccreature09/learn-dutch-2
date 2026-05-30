@@ -11,6 +11,7 @@ const NAV_LINKS = [
   { href: "/builder", label: "Sentence Builder", icon: "🧩" },
   { href: "/error-correction", label: "Error Correction", icon: "🔍" },
   { href: "/vocabulary", label: "Vocabulary", icon: "📖" },
+  { href: "/scenarios", label: "Scenarios", icon: "🗺️" },
 ];
 
 export default function Navbar() {

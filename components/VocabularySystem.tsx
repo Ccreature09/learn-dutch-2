@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import {
   searchDictionary,
   getVocabStats,
@@ -16,6 +16,8 @@ import {
 // vocabulary. Filters by POS, difficulty, frequency, category.
 // Verbs show full conjugation tables when expanded.
 // ─────────────────────────────────────────────────────────────
+
+const PAGE_SIZE = 24;
 
 const POS_OPTIONS = [
   { value: "", label: "All POS" },
@@ -183,14 +185,22 @@ function VocabCard({ entry }: { entry: DictionaryEntry }) {
 export default function VocabularySystem() {
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState<VocabFilters>({});
+  const [page, setPage] = useState(1);
 
   const stats = useMemo(() => getVocabStats(), []);
   const categories = useMemo(() => getAllCategories(), []);
 
+  // No hard limit — all results returned, paginated client-side
   const results = useMemo(
-    () => searchDictionary(query, filters, 60),
+    () => searchDictionary(query, filters),
     [query, filters],
   );
+
+  // Reset to first page whenever search results change
+  useEffect(() => { setPage(1); }, [results]);
+
+  const totalPages = Math.max(1, Math.ceil(results.length / PAGE_SIZE));
+  const pagedResults = results.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const updateFilter = useCallback(
     <K extends keyof VocabFilters>(key: K, value: VocabFilters[K]) => {
@@ -306,19 +316,59 @@ export default function VocabularySystem() {
       {/* Results count */}
       <div className="vocab-results-count">
         {results.length} {results.length === 1 ? "entry" : "entries"} found
-        {results.length === 60 && " (showing first 60)"}
+        {totalPages > 1 && ` — page ${page} of ${totalPages}`}
       </div>
 
-      {/* Results */}
-      <div className="vocab-results">
+      {/* Results — bento grid */}
+      <div className="vocab-bento">
         {results.length === 0 ? (
           <div className="vocab-empty">
             No entries found. Try a different search or reset the filters.
           </div>
         ) : (
-          results.map((entry) => <VocabCard key={entry.id} entry={entry} />)
+          pagedResults.map((entry) => <VocabCard key={entry.id} entry={entry} />)
         )}
       </div>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="vocab-pagination">
+          <button
+            className="vocab-page-btn"
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={page === 1}
+          >
+            ← Previous
+          </button>
+          <div className="vocab-page-numbers">
+            {Array.from({ length: totalPages }, (_, i) => i + 1)
+              .filter((p) => p === 1 || p === totalPages || Math.abs(p - page) <= 2)
+              .map((p, idx, arr) => {
+                const prev = arr[idx - 1];
+                return (
+                  <span key={p} className="vocab-page-slot">
+                    {prev !== undefined && p - prev > 1 && (
+                      <span className="vocab-page-ellipsis">…</span>
+                    )}
+                    <button
+                      className={`vocab-page-btn ${p === page ? "vocab-page-btn--active" : ""}`}
+                      onClick={() => setPage(p)}
+                    >
+                      {p}
+                    </button>
+                  </span>
+                );
+              })}
+          </div>
+          <button
+            className="vocab-page-btn"
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            disabled={page === totalPages}
+          >
+            Next →
+          </button>
+        </div>
+      )}
     </div>
   );
 }

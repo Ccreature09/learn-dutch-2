@@ -92,7 +92,7 @@ const TRANSITIVE_VERBS: EnrichedVerb[] = ALL_VERBS.filter(
   (v) => v.transitive && !v.isModal && !v.separable,
 );
 const INTRANSITIVE_VERBS: EnrichedVerb[] = ALL_VERBS.filter(
-  (v) => !v.transitive && !v.isModal,
+  (v) => !v.transitive && !v.isModal && !v.separable,
 );
 const DAT_VERBS: EnrichedVerb[] = ALL_VERBS.filter((v) => v.takesClauseObject);
 const MODAL_VERBS_LIST: EnrichedVerb[] = ALL_VERBS.filter((v) => v.isModal);

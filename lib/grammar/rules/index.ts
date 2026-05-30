@@ -420,12 +420,17 @@ export function ruleInversion(sentence: ParsedSentence): RuleResult {
     // Subject is before verb = inversion missing
     const subjectToken = mc[subjectIdx];
     const verbToken = mc[verbIdx];
-    const reconstructed = [
-      firstToken.surface,
-      verbToken.surface,
-      subjectToken.surface,
-      ...mc.filter((_, i) => i !== 0 && i !== verbIdx && i !== subjectIdx).map((t) => t.surface),
-    ].join(" ") + ".";
+
+    // Use the full first constituent (may span multiple tokens: "In het park")
+    const firstConstEnd = spanFirstConstituent(mc, 0, verbIdx);
+    const frontedSurface = mc.slice(0, firstConstEnd).map((t) => t.surface).join(" ");
+    const rest = mc
+      .filter((_, i) => i >= firstConstEnd && i !== verbIdx && i !== subjectIdx)
+      .map((t) => t.surface);
+    const trailingPunct = mc === sentence.mainClauseTokens
+      ? sentence.original.trimEnd().match(/[.!?]$/) ? sentence.original.trimEnd().slice(-1) : "."
+      : ".";
+    const reconstructed = [frontedSurface, verbToken.surface, subjectToken.surface, ...rest].join(" ") + trailingPunct;
 
     return {
       ruleName: "Inversion",

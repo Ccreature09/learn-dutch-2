@@ -14,6 +14,7 @@ export type PartOfSpeech =
   | "article"
   | "particle"
   | "numeral"
+  | "punctuation"
   | "unknown";
 
 export type GrammaticalRole =

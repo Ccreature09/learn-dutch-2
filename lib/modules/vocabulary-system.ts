@@ -75,12 +75,17 @@ function buildDictionary(): DictionaryEntry[] {
   }
 
   // Non-verb vocabulary (skip object pronouns and articles)
+  const seenIds = new Set<string>();
   for (const word of DUTCH_VOCABULARY) {
     if (SKIP_POS.has(word.pos)) continue;
     if (word.isObjectPronoun) continue;
 
+    const id = `vocab-${word.dutch}-${word.pos}-${word.english}`;
+    if (seenIds.has(id)) continue; // skip duplicates — same Dutch/POS/English combination
+    seenIds.add(id);
+
     entries.push({
-      id: `vocab-${word.dutch}-${word.pos}-${word.english}`,
+      id,
       dutch: word.dutch,
       english: word.english,
       pos: word.pos,
@@ -114,7 +119,7 @@ export interface VocabFilters {
 export function searchDictionary(
   query: string,
   filters?: VocabFilters,
-  maxResults = 60,
+  maxResults?: number,
 ): DictionaryEntry[] {
   const q = query.trim().toLowerCase();
 
@@ -157,7 +162,7 @@ export function searchDictionary(
     return a.dutch.localeCompare(b.dutch);
   });
 
-  return results.slice(0, maxResults);
+  return maxResults ? results.slice(0, maxResults) : results;
 }
 
 export function getDictionaryEntry(dutch: string): DictionaryEntry | undefined {

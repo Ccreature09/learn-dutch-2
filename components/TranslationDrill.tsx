@@ -4,6 +4,10 @@ import { useState, useCallback, useEffect } from "react";
 import { generateSentence, type ProceduralSentence } from "@/lib/modules/procedural-generator";
 import { validateSentence } from "@/lib/grammar/engine";
 import RuleResultDisplay from "@/components/RuleResultDisplay";
+import NaturalnessScore from "@/components/NaturalnessScore";
+import LearnerInsights from "@/components/LearnerInsights";
+import { useLearnerStore } from "@/lib/modules/learner-store";
+import { classifyRuleFailures } from "@/lib/utils/error-classifier";
 import type { Difficulty } from "@/lib/grammar/types";
 
 // ─────────────────────────────────────────────────────────────
@@ -22,16 +26,19 @@ type DrillMode = "A" | "B" | "C";
 interface DrillResult {
   isCorrect: boolean;
   score: number;
+  semanticScore: number;
+  overallStatus: "correct" | "unnatural" | "incorrect";
   feedback: string;
   modelAnswer: string;
   ruleResults: ReturnType<typeof validateSentence>["ruleResults"];
 }
 
 // ── Meaning check for EN→NL (Mode A) ─────────────────────────
-function checkDutchMeaning(userDutch: string, sentence: ProceduralSentence): boolean {
+function scoreDutchMeaning(userDutch: string, sentence: ProceduralSentence): number {
   const ul = userDutch.toLowerCase();
+  if (!sentence.keyDutchWords.length) return 100;
   const matched = sentence.keyDutchWords.filter((w) => ul.includes(w.toLowerCase()));
-  return matched.length >= Math.ceil(sentence.keyDutchWords.length * 0.6);
+  return Math.round((matched.length / sentence.keyDutchWords.length) * 100);
 }
 
 // ── Keyword check for NL→EN (Mode B) ─────────────────────────
@@ -49,21 +56,25 @@ function evaluateModeA(userAnswer: string, sentence: ProceduralSentence): DrillR
   const trimmed = userAnswer.trim();
   if (!trimmed) {
     return {
-      isCorrect: false, score: 0,
+      isCorrect: false, score: 0, semanticScore: 0,
+      overallStatus: "incorrect",
       feedback: "Please type your Dutch translation.",
       modelAnswer: sentence.dutch,
       ruleResults: [],
     };
   }
 
-  const validation = validateSentence(trimmed);
-  const grammarOk = validation.overallStatus === "correct" && validation.naturalScore >= 70;
-  const meaningOk = checkDutchMeaning(trimmed, sentence);
+  const validation    = validateSentence(trimmed);
+  const grammarOk     = validation.overallStatus === "correct" && validation.naturalScore >= 70;
+  const semanticScore = scoreDutchMeaning(trimmed, sentence);
+  const meaningOk     = semanticScore >= 60;
 
   if (grammarOk && meaningOk) {
     return {
       isCorrect: true,
       score: validation.naturalScore,
+      semanticScore,
+      overallStatus: validation.overallStatus,
       feedback: "Excellent! Grammatically correct and good meaning.",
       modelAnswer: sentence.dutch,
       ruleResults: validation.ruleResults,
@@ -74,6 +85,8 @@ function evaluateModeA(userAnswer: string, sentence: ProceduralSentence): DrillR
     return {
       isCorrect: false,
       score: 50,
+      semanticScore,
+      overallStatus: "incorrect",
       feedback: `Grammar looks good, but the meaning doesn't match. Try using: ${sentence.keyDutchWords.join(", ")}.`,
       modelAnswer: sentence.dutch,
       ruleResults: validation.ruleResults,
@@ -84,6 +97,8 @@ function evaluateModeA(userAnswer: string, sentence: ProceduralSentence): DrillR
   return {
     isCorrect: false,
     score: validation.naturalScore,
+    semanticScore,
+    overallStatus: validation.overallStatus,
     feedback: failures.length
       ? `Grammar issue: ${failures[0].message}`
       : "Check your Dutch sentence structure.",
@@ -96,21 +111,24 @@ function evaluateModeB(userAnswer: string, sentence: ProceduralSentence): DrillR
   const trimmed = userAnswer.trim();
   if (!trimmed) {
     return {
-      isCorrect: false, score: 0,
+      isCorrect: false, score: 0, semanticScore: 0,
+      overallStatus: "incorrect",
       feedback: "Please type your English translation.",
       modelAnswer: sentence.english,
       ruleResults: [],
     };
   }
 
-  const score = checkEnglishMeaning(trimmed, sentence);
-  const isCorrect = score >= 60;
+  const semanticScore = checkEnglishMeaning(trimmed, sentence);
+  const isCorrect = semanticScore >= 60;
 
   return {
     isCorrect,
-    score,
+    score: semanticScore,
+    semanticScore,
+    overallStatus: isCorrect ? "correct" : "incorrect",
     feedback: isCorrect
-      ? `Good translation! (${score}% key words matched)`
+      ? `Good translation! (${semanticScore}% key words matched)`
       : `Translation misses key content. Model answer: ${sentence.english}`,
     modelAnswer: sentence.english,
     ruleResults: [],
@@ -122,6 +140,7 @@ function evaluateModeB(userAnswer: string, sentence: ProceduralSentence): DrillR
 // ─────────────────────────────────────────────────────────────
 
 export default function TranslationDrill() {
+  const { recordMistake, recordAttempt } = useLearnerStore();
   const [mode, setMode] = useState<DrillMode>("A");
   const [difficulty, setDifficulty] = useState<Difficulty | "">("");
   const [sentence, setSentence] = useState<ProceduralSentence | null>(null);
@@ -133,9 +152,18 @@ export default function TranslationDrill() {
   const [sessionCorrect, setSessionCorrect] = useState(0);
 
   const next = useCallback(() => {
-    const opts = { difficulty: difficulty || undefined };
-    const s = generateSentence(opts);
-    setSentence(s);
+    const weakPatterns = useLearnerStore.getState().getWeakPatterns(3);
+    const opts = {
+      difficulty: difficulty || undefined,
+      ...(weakPatterns.length > 0 ? { boostPatterns: weakPatterns } : {}),
+    };
+    // Retry up to 10 times — generateSentence returns null only if every
+    // pattern generator fails (empty repo), which should not happen in practice.
+    let s: ProceduralSentence | null = null;
+    for (let i = 0; i < 10 && !s; i++) {
+      s = generateSentence(opts);
+    }
+    if (s) setSentence(s);
     setUserAnswer("");
     setResult(null);
     setShowRules(false);
@@ -157,11 +185,21 @@ export default function TranslationDrill() {
 
     setResult(res);
     setSessionTotal((t) => t + 1);
+    recordAttempt(sentence.pattern);
     if (res.isCorrect) {
       setStreak((s) => s + 1);
       setSessionCorrect((c) => c + 1);
     } else {
       setStreak(0);
+      const errorCats = classifyRuleFailures(res.ruleResults);
+      recordMistake({
+        exerciseType: "translation",
+        errorCategories: errorCats.length > 0 ? errorCats : ["semantic"],
+        verbsInvolved: [sentence.verbInfinitive],
+        patternInvolved: sentence.pattern,
+        userInput: userAnswer,
+        correctAnswer: res.modelAnswer,
+      });
     }
   }
 
@@ -313,6 +351,12 @@ export default function TranslationDrill() {
                     <span className="drill-model-label">Model answer:</span>
                     <span className="drill-model-text">{result.modelAnswer}</span>
                   </div>
+                  <NaturalnessScore
+                    ruleResults={result.ruleResults}
+                    naturalScore={result.score}
+                    semanticScore={result.semanticScore}
+                    status={result.overallStatus}
+                  />
                   {mode === "A" && result.ruleResults.length > 0 && (
                     <button
                       className="drill-toggle-rules"
@@ -340,6 +384,9 @@ export default function TranslationDrill() {
           {result ? "Next Sentence →" : "Skip"}
         </button>
       </div>
+
+      {/* Learner Insights */}
+      <LearnerInsights />
     </div>
   );
 }

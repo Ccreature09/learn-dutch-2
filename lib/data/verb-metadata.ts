@@ -158,8 +158,11 @@ export const VERB_METADATA: Record<string, VerbMetadata> = {
 
   // ── Physical / Daily ────────────────────────────────────────
   doen: {
-    transitive: true, takesClauseObject: false,
-    verbClass: "physical", cefrLevel: "A1", passivizable: true,
+    // Not transitive in the generator: "do [random noun]" almost always
+    // produces unnatural English ("do the problem", "do the book"), so
+    // doen appears only in intransitive and perfect patterns.
+    transitive: false, takesClauseObject: false,
+    verbClass: "physical", cefrLevel: "A1", passivizable: false,
   },
   slapen: {
     transitive: false, takesClauseObject: false,

@@ -33,9 +33,10 @@ import { ALL_RULES } from "@/lib/grammar/rules/index";
 function tokenize(sentence: string): string[] {
   return sentence
     .trim()
-    .replace(/[.!?;:,]/g, " $& ")   // add space around punctuation
+    .replace(/[.!?;:]/g, " $& ")    // space around sentence-ending punctuation
+    .replace(/,/g, " , ")            // keep comma as its own token (clause boundary)
     .split(/\s+/)
-    .filter((w) => w.length > 0 && !/^[.!?,;:]$/.test(w));  // strip punctuation tokens
+    .filter((w) => w.length > 0 && !/^[.!?;:]$/.test(w)); // strip terminal punct, keep ","
 }
 
 // ── Step 2: Tag Tokens ────────────────────────────────────────
@@ -44,6 +45,11 @@ function tagTokens(words: string[]): Token[] {
   // First pass: assign POS/role from lexicon and heuristics
   const tokens = words.map((word, index) => {
     const lower = word.toLowerCase();
+
+    // 0. Punctuation token (comma kept as clause-boundary marker)
+    if (lower === ",") {
+      return { surface: word, lower, lemma: ",", pos: "punctuation" as const, role: "unknown" as const, index } as Token;
+    }
 
     // 1. Check verb database (all conjugated forms)
     const verbInfo = VERB_FORM_LOOKUP[lower];
@@ -257,56 +263,84 @@ export function resolveAmbiguity(tokens: Token[], index: number): Token {
 // ── Step 3: Parse Sentence Structure ─────────────────────────
 
 function parseSentence(tokens: Token[], original: string): ParsedSentence {
-  // Find subordinating conjunction (marks start of subordinate clause)
+  // Find subordinating conjunction and first comma (clause-boundary markers)
   const subConjIdx = tokens.findIndex((t) => t.isSubordinatingConjunction);
+  const commaIdx   = tokens.findIndex((t) => t.lower === ",");
 
-  // Find finite verb
-  const finiteVerbIdx = tokens.findIndex((t) => t.isFiniteVerb);
+  // ── Determine main-clause vs subordinate-clause token ranges ──────────────
+  //
+  // Three cases:
+  //   A) No subordinate conjunction → entire token list is the main clause
+  //   B) Conjunction is sentence-initial ("Als ik kom, ga ik...") →
+  //        sub clause:  tokens[1 .. commaIdx)   (conjunction itself is excluded)
+  //        main clause: tokens[commaIdx+1 .. ]
+  //   C) Conjunction is mid-sentence ("Ik ga, omdat ik moe ben") →
+  //        main clause: tokens[0 .. subConjIdx)
+  //        sub clause:  tokens[subConjIdx+1 .. ]
 
-  // Find subject: first subject pronoun, or first noun before the finite verb
+  let mainClauseTokens: Token[];
+  let subClauseStart: number | null = null;
+  let subClauseEnd: number = tokens.length;
+
+  if (subConjIdx === -1) {
+    // Case A: plain main clause
+    mainClauseTokens = tokens;
+  } else if (subConjIdx === 0) {
+    // Case B: Als-initial — main clause follows the comma
+    subClauseStart = subConjIdx;
+    subClauseEnd   = commaIdx !== -1 ? commaIdx : tokens.length;
+    mainClauseTokens = commaIdx !== -1
+      ? tokens.slice(commaIdx + 1).filter((t) => t.lower !== ",")
+      : [];
+  } else {
+    // Case C: mid-sentence subordinate clause
+    subClauseStart   = subConjIdx;
+    mainClauseTokens = tokens.slice(0, subConjIdx).filter((t) => t.lower !== ",");
+  }
+
+  // ── Locate finite verb in the MAIN clause (not sub clause) ────────────────
+  const mcVerbLocalIdx = mainClauseTokens.findIndex((t) => t.isFiniteVerb);
+  // Translate back to global token index using the Token.index property
+  const finiteVerbIdx =
+    mcVerbLocalIdx !== -1 ? mainClauseTokens[mcVerbLocalIdx].index : -1;
+
+  // ── Locate subject in the main clause ─────────────────────────────────────
   let subjectIdx: number | null = null;
-  for (let i = 0; i < tokens.length; i++) {
-    const t = tokens[i];
+  for (const t of mainClauseTokens) {
     if (SUBJECT_PRONOUNS.has(t.lower) && t.pos === "pronoun") {
-      subjectIdx = i;
+      subjectIdx = t.index; // global index
       break;
     }
   }
-  // If no pronoun subject found, look for a noun before the verb
-  if (subjectIdx === null && finiteVerbIdx !== null) {
-    for (let i = 0; i < finiteVerbIdx; i++) {
-      if (tokens[i].pos === "noun") {
-        subjectIdx = i;
-        break;
-      }
+  if (subjectIdx === null && mcVerbLocalIdx !== -1) {
+    for (const t of mainClauseTokens.slice(0, mcVerbLocalIdx)) {
+      if (t.pos === "noun") { subjectIdx = t.index; break; }
     }
   }
 
-  // Determine sentence type
-  const sentenceType = inferSentenceType(tokens, finiteVerbIdx, subjectIdx);
+  // ── Sentence type classification ──────────────────────────────────────────
+  const sentenceType = inferSentenceType(
+    tokens,
+    subConjIdx === 0 ? finiteVerbIdx : tokens.findIndex((t) => t.isFiniteVerb),
+    subjectIdx,
+  );
 
-  // Main clause vs subordinate clause tokens
-  const mainClauseTokens =
-    subConjIdx !== null
-      ? tokens.slice(0, subConjIdx)
-      : tokens;
-
-  // Find finite verb in subordinate clause
-  const subClauseTokens = subConjIdx !== null ? tokens.slice(subConjIdx + 1) : [];
-  const finiteVerbIdxInSub =
-    subClauseTokens.findIndex((t) => t.isFiniteVerb) !== -1
-      ? subClauseTokens.findIndex((t) => t.isFiniteVerb)
-      : null;
+  // ── Subordinate clause verb position ──────────────────────────────────────
+  const subClauseTokens =
+    subClauseStart !== null
+      ? tokens.slice(subClauseStart + 1, subClauseEnd).filter((t) => t.lower !== ",")
+      : [];
+  const subVerbLocalIdx = subClauseTokens.findIndex((t) => t.isFiniteVerb);
 
   return {
     original,
     tokens,
     sentenceType,
     mainClauseTokens,
-    subordinateClauseStart: subConjIdx !== -1 ? subConjIdx : null,
+    subordinateClauseStart: subClauseStart,
     finiteVerbIndex: finiteVerbIdx !== -1 ? finiteVerbIdx : null,
     subjectIndex: subjectIdx,
-    finiteVerbIndexInSubordinate: finiteVerbIdxInSub,
+    finiteVerbIndexInSubordinate: subVerbLocalIdx !== -1 ? subVerbLocalIdx : null,
   };
 }
 
@@ -330,11 +364,9 @@ function inferSentenceType(
   const hasCoordConj = tokens.some((t) => t.isCoordinatingConjunction);
   if (hasSubConj) return "complex";
 
-  // Imperative: verb is first token (handled above by finiteVerbIdx === 0)
-  // Check if it could be imperative by verb form
-  if (finiteVerbIdx !== null && finiteVerbIdx === 0) {
-    return "imperative";
-  }
+  // Imperative: starts with a verb in stem form (not covered by polar_question already)
+  // Note: finiteVerbIdx === 0 already returned "polar_question" above, so this branch
+  // applies only when the first token is a verb but wasn't caught by the lookup.
 
   return "main_clause";
 }
