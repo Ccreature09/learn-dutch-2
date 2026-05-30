@@ -88,7 +88,7 @@ export function ruleV2WordOrder(sentence: ParsedSentence): RuleResult {
       message: `V2 violation: '${finiteToken.surface}' is in the ${finiteIdx + 1}th position. There are ${constituentsBefore} constituents before it.`,
       explanation:
         "Dutch V2 rule: the finite verb must be the SECOND constituent in a main clause. If an adverb or object is placed at the start, the subject must come AFTER the verb (inversion). Example: 'Vandaag WERK ik' — not 'Vandaag ik werk'.",
-      correctedSuggestion: buildV2Correction(mc),
+      correctedSuggestion: buildV2Correction(mc, sentence.original),
       affectedTokenIndices: [finiteToken.index],
       priority: 1,
     };
@@ -97,72 +97,104 @@ export function ruleV2WordOrder(sentence: ParsedSentence): RuleResult {
   return { ruleName: "V2 Word Order", ruleId: "v2", status: "pass", message: "V2 rule appears satisfied.", explanation: "", priority: 5 };
 }
 
-function countConstituents(tokens: Token[], start: number, end: number): number {
-  // Simplified constituent counting:
-  // Articles + following noun/adj = 1 constituent
-  // Single pronoun = 1 constituent
-  // Single adverb = 1 constituent
-  // Preposition + NP = 1 constituent
+/**
+ * Returns the exclusive-end index of the first constituent starting at `start`,
+ * respecting article+adj*+noun grouping and preposition+NP grouping.
+ * Pure function — exported for unit testing.
+ */
+export function spanFirstConstituent(tokens: Token[], start: number, end: number): number {
+  const ARTICLES = new Set(["de", "het", "een", "'t"]);
+  const PREPS = new Set([
+    "in", "op", "aan", "van", "voor", "met", "bij", "naar", "uit", "over",
+    "onder", "achter", "naast", "tussen", "door", "om", "tot", "zonder",
+    "tijdens", "tegen",
+  ]);
+
+  let i = start;
+  while (i < end) {
+    const tok = tokens[i];
+
+    // Skip coordinating conjunctions — not constituents
+    if (tok.isCoordinatingConjunction) { i++; continue; }
+
+    // Prepositional phrase → preposition + optional article + optional adj* + noun/pronoun
+    if (tok.pos === "preposition" || PREPS.has(tok.lower)) {
+      i++; // consume preposition
+      if (i < end && (ARTICLES.has(tokens[i].lower) || tokens[i].pos === "article")) i++;
+      while (i < end && tokens[i].pos === "adjective") i++;
+      if (i < end && (tokens[i].pos === "noun" || tokens[i].pos === "pronoun")) i++;
+      return i;
+    }
+
+    // Article + adjective* + noun → NP
+    if (ARTICLES.has(tok.lower) || tok.pos === "article") {
+      i++; // consume article
+      while (i < end && tokens[i].pos === "adjective") i++;
+      if (i < end && tokens[i].pos === "noun") i++;
+      return i;
+    }
+
+    // Single-token constituents
+    return i + 1;
+  }
+  return i;
+}
+
+/**
+ * Count true grammatical constituents in tokens[start..end).
+ * Groups article+adj*+noun, preposition+NP into single units.
+ * Coordinating conjunctions are not counted.
+ * Pure function — exported for unit testing.
+ */
+export function countConstituents(tokens: Token[], start: number, end: number): number {
   let count = 0;
   let i = start;
-  const ARTICLES = new Set(["de", "het", "een", "'t"]);
-  const PREPS = new Set(["in", "op", "aan", "van", "voor", "met", "bij", "naar", "uit", "over", "onder", "achter", "naast", "tussen", "door", "om", "tot", "zonder", "tijdens", "tegen"]);
 
   while (i < end) {
     const tok = tokens[i];
-    if (ARTICLES.has(tok.lower)) {
-      // Article group: consume article + adjectives + noun
-      count++;
-      i++;
-      while (i < end && (tokens[i].pos === "adjective" || (tokens[i].pos === "noun" && i < end))) {
-        i++;
-        if (tokens[i - 1].pos === "noun") break;
-      }
-    } else if (PREPS.has(tok.lower)) {
-      // Prepositional phrase
-      count++;
-      i++;
-      // Consume the NP after the preposition
-      if (i < end && ARTICLES.has(tokens[i].lower)) {
-        i++;
-        while (i < end && tokens[i].pos !== "verb" && !PREPS.has(tokens[i].lower)) i++;
-      } else if (i < end && tokens[i].pos === "pronoun") {
-        i++;
-      } else if (i < end && tokens[i].pos === "noun") {
-        i++;
-      }
-    } else if (tok.pos === "pronoun" || tok.pos === "noun" || tok.pos === "adjective") {
-      count++;
-      i++;
-    } else if (tok.pos === "adverb") {
-      count++;
-      i++;
-    } else if (tok.pos === "numeral") {
-      count++;
-      i++;
-    } else {
-      i++;
-    }
+
+    // Skip coordinating conjunctions and punctuation — not constituents
+    if (tok.isCoordinatingConjunction || tok.pos === "punctuation") { i++; continue; }
+
+    // Everything else: advance by one full constituent and count it
+    const next = spanFirstConstituent(tokens, i, end);
+    if (next === i) { i++; continue; } // safety: avoid infinite loop
+    count++;
+    i = next;
   }
+
   return count;
 }
 
-function buildV2Correction(mc: Token[]): string {
-  // Try to suggest a corrected sentence by finding fronted element + moving verb to 2nd position
+/**
+ * Rebuild the main clause in correct V2 order and return it as a string,
+ * preserving the original sentence's trailing punctuation.
+ *
+ * Correct structure: [first constituent] + [verb] + [between] + [rest]
+ * "between" is whatever appeared between the fronted constituent and the verb
+ * (typically the misplaced subject).
+ *
+ * Pure function — exported for unit testing.
+ */
+export function buildV2Correction(mc: Token[], original = ""): string {
+  // Preserve the trailing punctuation from the original sentence (default to ".")
+  const trailingPunct = original.trimEnd().match(/[.!?]$/) ? original.trimEnd().slice(-1) : ".";
+
   const verbIdx = mc.findIndex((t) => t.isFiniteVerb);
-  if (verbIdx <= 1) return mc.map((t) => t.surface).join(" ");
+  if (verbIdx <= 1) return mc.map((t) => t.surface).join(" ") + trailingPunct;
 
-  // Get the first constituent (the fronted element)
-  const fronted = mc[0].surface;
-  // Verb
+  // Identify the end of the first full constituent (may be multi-token: "De grote man")
+  const firstConstEnd = spanFirstConstituent(mc, 0, verbIdx);
+
+  // Slice the three zones
+  const fronted = mc.slice(0, firstConstEnd).map((t) => t.surface);
   const verb = mc[verbIdx].surface;
-  // Subject (if it exists before verb and after first token)
-  const between = mc.slice(1, verbIdx).map((t) => t.surface);
-  const after = mc.slice(verbIdx + 1).map((t) => t.surface);
+  const between = mc.slice(firstConstEnd, verbIdx).map((t) => t.surface); // typically the subject
+  const rest = mc.slice(verbIdx + 1).map((t) => t.surface);
 
-  // Construct: Fronted + Verb + Between + After
-  return [fronted, verb, ...between, ...after].join(" ") + ".";
+  return [...fronted, verb, ...between, ...rest].join(" ") + trailingPunct;
 }
+
 
 // ── RULE 2: Verb Conjugation ──────────────────────────────────
 //

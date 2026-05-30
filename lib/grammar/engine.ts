@@ -41,7 +41,8 @@ function tokenize(sentence: string): string[] {
 // ── Step 2: Tag Tokens ────────────────────────────────────────
 
 function tagTokens(words: string[]): Token[] {
-  return words.map((word, index) => {
+  // First pass: assign POS/role from lexicon and heuristics
+  const tokens = words.map((word, index) => {
     const lower = word.toLowerCase();
 
     // 1. Check verb database (all conjugated forms)
@@ -128,6 +129,9 @@ function tagTokens(words: string[]): Token[] {
       index,
     } as Token;
   });
+
+  // Second pass: resolve POS ambiguities using token context
+  return tokens.map((_, i) => resolveAmbiguity(tokens, i));
 }
 
 function guessPoS(word: string, index: number, allWords: string[]): PartOfSpeech {
@@ -140,6 +144,114 @@ function guessPoS(word: string, index: number, allWords: string[]): PartOfSpeech
   // -en ending on longer words → likely infinitive/plural
   if (word.endsWith("en") && word.length > 4) return "verb";
   return "unknown";
+}
+
+// ── Step 2b: Ambiguity Resolution ────────────────────────────
+//
+// Runs AFTER initial tagging. Uses surrounding token context to
+// resolve three known Dutch POS ambiguities:
+//
+//   "het"        — article (before noun) vs pronoun (elsewhere)
+//   "als"        — subordinating conjunction (verb…als…subject pattern)
+//                  vs preposition/adverb (comparison context)
+//   op/aan/uit/door — separable prefix (clause-final) vs preposition (before NP)
+
+/** Return true if the token at `i` is the last non-punctuation token. */
+function isClauseFinal(tokens: Token[], i: number): boolean {
+  for (let j = i + 1; j < tokens.length; j++) {
+    if (tokens[j].pos !== "punctuation" && tokens[j].lower !== ",") return false;
+  }
+  return true;
+}
+
+/** Return true if `t` is a noun-like token (noun, pronoun, or unknown that acts as NP head). */
+function isNounLike(t: Token): boolean {
+  return t.pos === "noun" || t.pos === "pronoun" || t.pos === "unknown";
+}
+
+/**
+ * Resolve a single ambiguous token using its neighbours.
+ * Pure function — returns an updated copy of the token (or the original if no change needed).
+ */
+export function resolveAmbiguity(tokens: Token[], index: number): Token {
+  const token = tokens[index];
+  const prev = index > 0 ? tokens[index - 1] : null;
+  const next = index < tokens.length - 1 ? tokens[index + 1] : null;
+
+  // ── "het" ──────────────────────────────────────────────────
+  // het + noun-like → article; otherwise keep as pronoun
+  if (token.lower === "het") {
+    if (next && isNounLike(next)) {
+      // Article slot: "het huis", "het grote boek"
+      return { ...token, pos: "article", role: "unknown" };
+    }
+    // Standalone use: subject pronoun ("Het regent", "Ik zie het")
+    if (token.pos !== "article") {
+      return { ...token, pos: "pronoun", role: "subject" };
+    }
+    return token;
+  }
+
+  // ── "als" ──────────────────────────────────────────────────
+  // Pattern: [verb] als [NP/pronoun] → subordinating conjunction (verb-final trigger)
+  // Pattern: [adjective/adverb] als → comparison preposition
+  if (token.lower === "als") {
+    const prevIsVerb = prev?.pos === "verb";
+    const prevIsAdjOrAdv =
+      prev?.pos === "adjective" || prev?.pos === "adverb";
+
+    if (prevIsAdjOrAdv) {
+      // "zo groot als een huis" — comparison, NOT a clause trigger
+      return {
+        ...token,
+        pos: "preposition",
+        role: "adverbial",
+        isSubordinatingConjunction: false,
+        isCoordinatingConjunction: false,
+      };
+    }
+
+    if (prevIsVerb || SUBJECT_PRONOUNS.has(prev?.lower ?? "")) {
+      // "Als ik kom…" / "Ik doe het als jij het doet" — subordinating
+      return {
+        ...token,
+        pos: "conjunction",
+        role: "subordinating_conjunction",
+        isSubordinatingConjunction: true,
+        isCoordinatingConjunction: false,
+      };
+    }
+
+    return token;
+  }
+
+  // ── op / aan / uit / door ──────────────────────────────────
+  // These are in SEPARABLE_PREFIXES but also function as prepositions.
+  // Heuristic: clause-final → separable prefix; followed by NP → preposition.
+  const DUAL_ROLE = new Set(["op", "aan", "uit", "door"]);
+  if (DUAL_ROLE.has(token.lower)) {
+    if (isClauseFinal(tokens, index)) {
+      // "Ik bel hem op." — separable prefix at end of clause
+      return {
+        ...token,
+        pos: "particle",
+        role: "separable_prefix",
+        isSeparablePrefix: true,
+      };
+    }
+    if (next && isNounLike(next)) {
+      // "op de tafel", "door het park" — preposition before NP
+      return {
+        ...token,
+        pos: "preposition",
+        role: "adverbial",
+        isSeparablePrefix: false,
+      };
+    }
+    return token;
+  }
+
+  return token;
 }
 
 // ── Step 3: Parse Sentence Structure ─────────────────────────
