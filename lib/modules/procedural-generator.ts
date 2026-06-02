@@ -7,6 +7,7 @@ import {
   type ObjectBankEntry as ObjectEntry,
   type AdverbBankEntry as AdverbEntry,
 } from "@/lib/data/lexicon";
+import { NOUN_METADATA } from "@/lib/data/noun-metadata";
 import { validateSentence } from "@/lib/grammar/engine";
 import type { SentenceCategory, Difficulty } from "@/lib/grammar/types";
 import {
@@ -32,7 +33,8 @@ import {
 // Utility
 // ─────────────────────────────────────────────────────────────
 
-function weightedRandom<T extends { weight: number }>(items: T[]): T {
+function weightedRandom<T extends { weight: number }>(items: T[]): T | null {
+  if (items.length === 0) return null;
   const total = items.reduce((s, i) => s + i.weight, 0);
   let r = Math.random() * total;
   for (const item of items) {
@@ -473,8 +475,8 @@ function genSeparable(s: SubjectEntry, tense: "present" | "past"): ProceduralSen
   const prefix = verb.separablePrefix!;
   const vf = dutchForm(verb, s.person, s.number, tense);
   const eb = getEnglishBase(verb.translation);
-  const needsObj = ["opbellen", "meenemen", "afmaken", "opzoeken"].includes(verb.infinitive);
-  const compatObjs = needsObj ? getCompatibleObjects(verb.infinitive) : [];
+  // Use metadata — a transitive separable verb (opslaan, uitvoeren, opleveren, …) should get an object
+  const compatObjs = getCompatibleObjects(verb.infinitive);
   const obj = compatObjs.length > 0 ? pickRandom(compatObjs) : null;
   const dutch = obj
     ? `${s.dutch} ${vf} ${obj.dutch} ${prefix}.`
@@ -499,8 +501,9 @@ function genSeparable(s: SubjectEntry, tense: "present" | "past"): ProceduralSen
 
 function genSubordinate(s: SubjectEntry): ProceduralSentence | null {
   const mainPool = datVerbs();
+  // B6 fix: also exclude modal verbs from the subordinate verb pool
   const intPool = intransitiveVerbs().filter(
-    (v) => v.infinitive !== "zijn" && v.infinitive !== "hebben",
+    (v) => v.infinitive !== "zijn" && v.infinitive !== "hebben" && !v.isModal,
   );
   if (!mainPool.length || !intPool.length) return null;
   const mainVerb = pickRandom(mainPool);
@@ -634,8 +637,9 @@ function genPassive(_s: SubjectEntry): ProceduralSentence | null {
   for (let i = 0; i < 4; i++) {
     const verb = pickRandom(passivePool);
     const compatObjs = getCompatibleObjects(verb.infinitive).filter(
-      // Exclude known plural nouns (use "wordt" for singular only)
-      (o) => !["kinderen", "boodschappen", "kleren"].includes(o.baseWord),
+      // B7 fix: only include countable singular nouns (those with a plural form in NOUN_METADATA)
+      // Inherently plural/mass nouns lack a `plural` property and cannot pair with "wordt"
+      (o) => NOUN_METADATA[o.baseWord]?.plural !== undefined,
     );
     if (!compatObjs.length) continue;
     const obj = pickRandom(compatObjs);
@@ -777,6 +781,7 @@ export function generateSentence(opts: GenerationOptions = {}): ProceduralSenten
   }
 
   const s = weightedRandom(SUBJECTS);
+  if (!s) return null;
   const impliedTense =
     category === "simple_past"
       ? "past"

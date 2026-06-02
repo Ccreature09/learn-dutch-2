@@ -143,6 +143,7 @@ export interface FlashCard {
   lastReviewed: number | null;
   nextReview: number | null;        // kept for compatibility; scheduling uses reviewInterval
   reviewInterval: number;           // count-based SRS: cards to see before reviewing again
+  easeFactor?: number;              // SM-2 ease factor (default 2.5)
   isUserCreated: boolean;
   verbData?: {
     infinitive: string;

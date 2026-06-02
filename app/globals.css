@@ -706,3 +706,142 @@ body {
   .ns-row                    { grid-template-columns: 5rem 1fr 2rem; }
   .insights-stats            { gap: 0.75rem; }
 }
+
+/* ── F4: Streak banner & session summary ──────────────────── */
+.streak-banner {
+  position: fixed;
+  top: 1.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--color-accent);
+  color: #fff;
+  font-size: 1.1rem;
+  font-weight: 700;
+  padding: 0.6rem 1.5rem;
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 16px rgba(0,0,0,.25);
+  z-index: 1000;
+  pointer-events: none;
+  animation: banner-pop 0.2s ease;
+}
+
+@keyframes banner-pop {
+  from { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+.session-summary {
+  background: var(--color-surface);
+  border: 2px solid var(--color-primary);
+  border-radius: var(--radius-lg);
+  padding: 1.5rem 2rem;
+  margin: 0 auto 1rem;
+  max-width: 26rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+  text-align: center;
+  box-shadow: 0 4px 20px var(--color-shadow);
+}
+.session-summary__title  { font-size: 1.25rem; font-weight: 700; color: var(--color-primary); }
+.session-summary__stat   { font-size: 2rem; font-weight: 800; color: var(--color-text); }
+.session-summary__streak { color: var(--color-accent); font-weight: 600; }
+.session-summary__continue { margin-top: 0.5rem; }
+
+/* ── F6: Free-builder inline rule breakdown ───────────────── */
+.free-builder__rule-breakdown {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  margin-top: 0.5rem;
+  overflow: hidden;
+}
+.free-builder__rule-breakdown-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  background: var(--color-bg);
+  border: none;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  text-align: left;
+}
+.free-builder__rule-breakdown-toggle:hover { color: var(--color-text); }
+.free-builder__rule-breakdown-body {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.25s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0 0.75rem;
+}
+.free-builder__rule-breakdown-body--open {
+  max-height: 20rem;
+  padding: 0.6rem 0.75rem;
+}
+.free-builder__rule-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  font-size: 0.83rem;
+  line-height: 1.4;
+}
+.free-builder__rule-dot {
+  display: inline-block;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 0.15rem;
+}
+.free-builder__rule-dot--fail    { background: var(--color-fail); }
+.free-builder__rule-dot--warning { background: var(--color-warning); }
+.free-builder__rule-name { font-weight: 600; white-space: nowrap; }
+.free-builder__rule-desc { color: var(--color-text-muted); }
+
+/* ── F7: Flashcard tile conjugation popover ───────────────── */
+.flashcard-tile__popover-trigger {
+  position: relative;
+  display: inline-block;
+  margin: 0.25rem 0;
+  cursor: default;
+}
+.flashcard-tile__popover-trigger:focus-within .flashcard-tile__popover,
+.flashcard-tile__popover-trigger:hover .flashcard-tile__popover {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+.flashcard-tile__popover-hint {
+  font-size: 0.75rem;
+  color: var(--color-primary);
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+}
+.flashcard-tile__popover {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 4px);
+  z-index: 100;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 16px var(--color-shadow);
+  padding: 0.6rem 0.8rem;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  min-width: 10rem;
+  white-space: nowrap;
+}
+.flashcard-tile__conj-table { border-collapse: collapse; font-size: 0.82rem; }
+.flashcard-tile__conj-table td { padding: 0.15rem 0.4rem; }
+.flashcard-tile__conj-label { color: var(--color-text-muted); text-align: right; font-style: italic; }
+.flashcard-tile__conj-form  { font-weight: 600; color: var(--color-text); }

@@ -5,7 +5,6 @@ import { DUTCH_VERBS, getExpectedFiniteForm } from "@/lib/data/verbs";
 import { CONJUNCTION_BANK, FREE_BUILDER_VERBS, SUBJECT_BANK as SUBJECTS, OBJECT_BANK as OBJECTS, ADVERB_BANK as ADVERBS } from "@/lib/data/lexicon";
 import { validateSentence } from "@/lib/grammar/engine";
 import type { ValidationResult } from "@/lib/grammar/types";
-import RuleResultDisplay from "@/components/RuleResultDisplay";
 
 // ─────────────────────────────────────────────────────────────
 // Free Sentence Builder — Mode 2
@@ -41,6 +40,8 @@ export default function FreeSentenceBuilder() {
   const [activeBank, setActiveBank] = useState<"subjects" | "verbs" | "objects" | "adverbs" | "other">(
     "subjects",
   );
+  // F6: collapsible rule breakdown
+  const [ruleBreakdownOpen, setRuleBreakdownOpen] = useState(true);
 
   // Assemble sentence and validate
   const runValidation = useCallback((toks: SelectedToken[]) => {
@@ -203,12 +204,43 @@ export default function FreeSentenceBuilder() {
         </button>
       </div>
 
-      {/* Grammar breakdown */}
-      {validation && (
-        <div className="free-builder__rules">
-          <RuleResultDisplay results={validation.ruleResults} showAll={false} />
-        </div>
-      )}
+      {/* F6: Collapsible inline rule breakdown — shown only after ≥3 tokens, fail/warning rules only */}
+      {validation && tokens.length >= 3 && (() => {
+        const issues = validation.ruleResults.filter(
+          (r) => r.status === "fail" || r.status === "warning",
+        );
+        if (issues.length === 0) return null;
+        return (
+          <div className="free-builder__rule-breakdown">
+            <button
+              className="free-builder__rule-breakdown-toggle"
+              onClick={() => setRuleBreakdownOpen((o) => !o)}
+              aria-expanded={ruleBreakdownOpen}
+            >
+              Grammar notes ({issues.length}) {ruleBreakdownOpen ? "▲" : "▼"}
+            </button>
+            <div
+              className={`free-builder__rule-breakdown-body ${ruleBreakdownOpen ? "free-builder__rule-breakdown-body--open" : ""}`}
+            >
+              {issues.map((r) => {
+                const firstSentence = r.explanation
+                  ? r.explanation.split(/[.!?]/)[0].trim()
+                  : r.message.split(/[.!?]/)[0].trim();
+                return (
+                  <div key={r.ruleId} className="free-builder__rule-item">
+                    <span
+                      className={`free-builder__rule-dot free-builder__rule-dot--${r.status}`}
+                      aria-label={r.status}
+                    />
+                    <span className="free-builder__rule-name">{r.ruleName}:</span>
+                    <span className="free-builder__rule-desc">{firstSentence || r.message}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Verb picker modal */}
       {verbPicker && (

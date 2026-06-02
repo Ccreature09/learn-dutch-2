@@ -51,6 +51,7 @@ export default function FlashcardSystem() {
     currentCard,
     sessionProgress,
     sessionTotal,
+    cycleCount,
   } = useFlashcardStore();
 
   const [mode,             setMode]             = useState<Mode>("browse");
@@ -64,8 +65,7 @@ export default function FlashcardSystem() {
   const [sessionDifficulty,setSessionDifficulty]= useState<Difficulty | "">("");
   const [sessionCategory,  setSessionCategory]  = useState<DeckCategory>("");
   const [noTransition,     setNoTransition]     = useState(false);
-  const [cycleCount,       setCycleCount]       = useState(0);
-  const [lastDoneCount,    setLastDoneCount]     = useState(0);
+  // B9: cycleCount now comes from the store — removed from component state
   const [isDeHetMode,      setIsDeHetMode]      = useState(false);
   const [deHetFeedback,    setDeHetFeedback]    = useState<{ chosen: "de" | "het"; correct: boolean } | null>(null);
   const [isLiveNumbers,    setIsLiveNumbers]    = useState(false);
@@ -119,15 +119,7 @@ export default function FlashcardSystem() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, flipped, isDeHetMode, deHetFeedback, isLiveNumbers, liveFlipped, sessionStarted, sessionDone, active?.id]);
 
-  // Detect when the deck has cycled (done count resets to 0 while session is active)
-  useEffect(() => {
-    if (!sessionStarted) return;
-    if (lastDoneCount > 0 && progress.done === 0) {
-      setCycleCount((n) => n + 1);
-    }
-    setLastDoneCount(progress.done);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [progress.done, sessionStarted]);
+  // B9: cycleCount is now tracked in the Zustand store — no component-level cycle detection needed.
 
   function handleReview(correct: boolean) {
     if (!active) return;
@@ -153,8 +145,6 @@ export default function FlashcardSystem() {
       newLiveNumber();
       setIsDeHetMode(false);
       setDeHetFeedback(null);
-      setCycleCount(0);
-      setLastDoneCount(0);
       setFlipped(false);
       setMode("review");
       return;
@@ -165,8 +155,6 @@ export default function FlashcardSystem() {
     setIsDeHetMode(isDeHet);
     setDeHetFeedback(null);
     setIsLiveNumbers(false);
-    setCycleCount(0);
-    setLastDoneCount(0);
     setFlipped(false);
     setMode("review");
   }
@@ -306,6 +294,38 @@ export default function FlashcardSystem() {
                 <div className="flashcard-tile__back">{card.back}</div>
                 {card.example && (
                   <div className="flashcard-tile__example">{card.example}</div>
+                )}
+                {/* F7: CSS-only conjugation popover for verb tiles */}
+                {card.category === "verbs" && card.verbData && (
+                  <div
+                    className="flashcard-tile__popover-trigger"
+                    tabIndex={0}
+                    aria-label={`Conjugation forms for ${card.verbData.infinitive}`}
+                  >
+                    <span className="flashcard-tile__popover-hint">Forms ▾</span>
+                    <div className="flashcard-tile__popover" role="tooltip">
+                      <table className="flashcard-tile__conj-table">
+                        <tbody>
+                          <tr>
+                            <td className="flashcard-tile__conj-label">infinitief</td>
+                            <td className="flashcard-tile__conj-form">{card.verbData.infinitive}</td>
+                          </tr>
+                          <tr>
+                            <td className="flashcard-tile__conj-label">ik</td>
+                            <td className="flashcard-tile__conj-form">{card.verbData.presentSg1}</td>
+                          </tr>
+                          <tr>
+                            <td className="flashcard-tile__conj-label">hij/zij</td>
+                            <td className="flashcard-tile__conj-form">{card.verbData.presentSg3}</td>
+                          </tr>
+                          <tr>
+                            <td className="flashcard-tile__conj-label">voltooid dw.</td>
+                            <td className="flashcard-tile__conj-form">{card.verbData.pastParticiple}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
                 )}
                 <div className="flashcard-tile__meta">
                   <span className={`badge badge--${card.difficulty}`}>{card.difficulty}</span>

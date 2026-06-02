@@ -201,6 +201,7 @@ export function resolveAmbiguity(tokens: Token[], index: number): Token {
   // ── "als" ──────────────────────────────────────────────────
   // Pattern: [verb] als [NP/pronoun] → subordinating conjunction (verb-final trigger)
   // Pattern: [adjective/adverb] als → comparison preposition
+  // Pattern: als [noun/adjective] → preposition in role context ("als student")
   if (token.lower === "als") {
     const prevIsVerb = prev?.pos === "verb";
     const prevIsAdjOrAdv =
@@ -208,6 +209,18 @@ export function resolveAmbiguity(tokens: Token[], index: number): Token {
 
     if (prevIsAdjOrAdv) {
       // "zo groot als een huis" — comparison, NOT a clause trigger
+      return {
+        ...token,
+        pos: "preposition",
+        role: "adverbial",
+        isSubordinatingConjunction: false,
+        isCoordinatingConjunction: false,
+      };
+    }
+
+    // B4 fix: "als student", "als leraar" — role/comparison preposition
+    // When the next token is a noun or adjective, treat als as a preposition
+    if (next && (next.pos === "noun" || next.pos === "adjective" || next.pos === "article")) {
       return {
         ...token,
         pos: "preposition",

@@ -103,7 +103,14 @@ export function ruleV2WordOrder(sentence: ParsedSentence): RuleResult {
  * Pure function — exported for unit testing.
  */
 export function spanFirstConstituent(tokens: Token[], start: number, end: number): number {
-  const ARTICLES = new Set(["de", "het", "een", "'t"]);
+  // B1 fix: expanded set includes possessives and demonstratives in addition to articles
+  const ARTICLES = new Set([
+    "de", "het", "een", "'t",
+    // possessives
+    "mijn", "jouw", "zijn", "haar", "ons", "onze", "hun", "uw",
+    // demonstratives
+    "deze", "die", "dit", "dat",
+  ]);
   const PREPS = new Set([
     "in", "op", "aan", "van", "voor", "met", "bij", "naar", "uit", "over",
     "onder", "achter", "naast", "tussen", "door", "om", "tot", "zonder",
@@ -329,9 +336,15 @@ export function ruleSubordinateVerbFinal(sentence: ParsedSentence): RuleResult {
   // The last token(s) should be the verb(s)
   // Find the last verb index
   const lastVerbLocalIdx = verbsInSub[verbsInSub.length - 1].localIdx;
+  // B2 fix: also exclude prepositions and separable prefixes from the "non-verb after verb" check
   const nonVerbAfterLastVerb = subClauseTokens
     .slice(lastVerbLocalIdx + 1)
-    .filter((t) => t.pos !== "particle" && t.pos !== "unknown");
+    .filter((t) =>
+      t.pos !== "particle" &&
+      t.pos !== "unknown" &&
+      t.pos !== "preposition" &&
+      !t.isSeparablePrefix,
+    );
 
   if (nonVerbAfterLastVerb.length > 0) {
     const wronglyPlaced = verbsInSub.map(({ t }) => t.surface).join(", ");
@@ -377,7 +390,13 @@ export function ruleInversion(sentence: ParsedSentence): RuleResult {
 
   const firstToken = mc[0];
   const SUBJECT_PRONOUNS_SET = new Set(["ik", "jij", "je", "u", "hij", "zij", "ze", "het", "wij", "we", "jullie", "men"]);
-  const ARTICLES = new Set(["de", "het", "een", "'t"]);
+  // B3 fix: expanded to include possessives and demonstratives; use spanFirstConstituent
+  // to correctly span the whole NP before deciding no inversion is needed.
+  const ARTICLE_LIKE = new Set([
+    "de", "het", "een", "'t",
+    "mijn", "jouw", "zijn", "haar", "ons", "onze", "hun", "uw",
+    "deze", "die", "dit", "dat",
+  ]);
 
   // If sentence starts with a subject pronoun, no inversion needed
   if (SUBJECT_PRONOUNS_SET.has(firstToken.lower)) {
@@ -385,9 +404,17 @@ export function ruleInversion(sentence: ParsedSentence): RuleResult {
     return { ruleName: "Inversion", ruleId: "inversion", status: "pass", message: "Sentence starts with subject — no inversion needed.", explanation: "", priority: 5 };
   }
 
-  // If sentence starts with article (likely a noun phrase subject), no inversion needed
-  if (ARTICLES.has(firstToken.lower)) {
-    return { ruleName: "Inversion", ruleId: "inversion", status: "pass", message: "Sentence starts with a noun phrase subject — no inversion needed.", explanation: "", priority: 5 };
+  // If sentence starts with article/possessive/demonstrative, use spanFirstConstituent
+  // to verify the whole NP is a subject NP (verb immediately follows it)
+  if (ARTICLE_LIKE.has(firstToken.lower)) {
+    const verbIdx = mc.findIndex((t) => t.isFiniteVerb);
+    const firstConstEnd = spanFirstConstituent(mc, 0, mc.length);
+    // Subject pronoun after verb means inversion happened (object NP fronted) — also fine
+    const subjectAfterVerb = verbIdx !== -1 && mc.slice(verbIdx + 1).some((t) => SUBJECT_PRONOUNS_SET.has(t.lower));
+    if (firstConstEnd === verbIdx || subjectAfterVerb) {
+      return { ruleName: "Inversion", ruleId: "inversion", status: "pass", message: "Sentence starts with a noun phrase — structure looks correct.", explanation: "", priority: 5 };
+    }
+    // NP not immediately before verb — fall through to standard inversion check
   }
 
   // Sentence starts with a non-subject fronted element (adverb, PP, etc.)
@@ -617,13 +644,24 @@ export function ruleAuxiliarySelection(sentence: ParsedSentence): RuleResult {
       ? "Movement/state-change verbs (gaan, komen, worden, blijven, vallen, etc.) use 'zijn'."
       : "Transitive and most other verbs use 'hebben'.";
 
+  // Map the wrong auxiliary's exact form to the matching form of the correct auxiliary
+  // so the correction suggestion has the right person/number.
+  const ZIJN_TO_HEBBEN: Record<string, string> = {
+    ben: "heb", bent: "hebt", is: "heeft", zijn: "hebben", was: "had", waren: "hadden",
+  };
+  const HEBBEN_TO_ZIJN: Record<string, string> = {
+    heb: "ben", hebt: "bent", heeft: "is", hebben: "zijn", had: "was", hadden: "waren",
+  };
+  const formMap = usedZijn ? ZIJN_TO_HEBBEN : HEBBEN_TO_ZIJN;
+  const correctedAuxForm = formMap[auxToken.lower] ?? (expectedAux === "hebben" ? "heb" : "is");
+
   return {
     ruleName: "Auxiliary Selection",
     ruleId: "auxiliary",
     status: "fail",
     message: `Wrong auxiliary: '${auxToken.surface}' used, but '${mainVerb.infinitive}' requires '${expectedAux}'.`,
     explanation: `${reason} Use '${expectedAux}' with '${pp.surface}'.`,
-    correctedSuggestion: tokens.map((t) => (t.index === auxToken.index ? (expectedAux === "hebben" ? "heb" : "is") : t.surface)).join(" "),
+    correctedSuggestion: tokens.map((t) => (t.index === auxToken.index ? correctedAuxForm : t.surface)).join(" "),
     affectedTokenIndices: [auxToken.index],
     priority: 1,
   };
@@ -778,6 +816,120 @@ export function ruleProfessionArticleUsage(sentence: ParsedSentence): RuleResult
 }
 
 // ── Export all rules ──────────────────────────────────────────
+
+// ── RULE 10: Negation Placement ──────────────────────────────
+//
+// 'niet' placement in Dutch: typically comes after the direct object
+// and before prepositional phrases / adjective complements.
+// Warns when 'niet' appears in position 1 (right after subject) or
+// immediately before the finite verb (unusual in most cases).
+//
+export function ruleNegation(sentence: ParsedSentence): RuleResult {
+  const mc = sentence.mainClauseTokens;
+  const nietLocalIdx = mc.findIndex((t) => t.lower === "niet");
+
+  if (nietLocalIdx === -1) {
+    return {
+      ruleName: "Negation Placement",
+      ruleId: "negation",
+      status: "pass",
+      message: "No 'niet' detected.",
+      explanation: "",
+      priority: 5,
+    };
+  }
+
+  const verbLocalIdx = mc.findIndex((t) => t.isFiniteVerb);
+  const SUBJECT_PRONOUNS_SET = new Set(["ik", "jij", "je", "u", "hij", "zij", "ze", "het", "wij", "we", "jullie", "men"]);
+  const subjectLocalIdx = mc.findIndex((t) => SUBJECT_PRONOUNS_SET.has(t.lower) || t.role === "subject");
+
+  // 'niet' immediately before the finite verb with material before subject is unusual
+  if (verbLocalIdx > 1 && nietLocalIdx === verbLocalIdx - 1 && subjectLocalIdx !== -1 && subjectLocalIdx < verbLocalIdx - 1) {
+    return {
+      ruleName: "Negation Placement",
+      ruleId: "negation",
+      status: "warning",
+      message: "'niet' immediately before the finite verb is unusual. It usually comes after the direct object.",
+      explanation: "In Dutch, 'niet' typically follows the direct object: 'Ik zie hem niet' rather than 'Ik niet zie hem'. Placing 'niet' just before the finite verb is uncommon in main clauses.",
+      priority: 3,
+    };
+  }
+
+  // 'niet' in position 1 (right after subject, before the verb) — typically wrong
+  if (subjectLocalIdx !== -1 && nietLocalIdx === subjectLocalIdx + 1 && verbLocalIdx > nietLocalIdx) {
+    return {
+      ruleName: "Negation Placement",
+      ruleId: "negation",
+      status: "warning",
+      message: "'niet' in position 1 after subject may be incorrect. In Dutch, 'niet' usually comes after the direct object or at the end.",
+      explanation: "Dutch negation 'niet' usually follows the direct object: 'Ik doe het niet' rather than 'Ik niet doe het'. Check that 'niet' is placed correctly.",
+      priority: 3,
+    };
+  }
+
+  return {
+    ruleName: "Negation Placement",
+    ruleId: "negation",
+    status: "pass",
+    message: "'niet' placement appears correct.",
+    explanation: "",
+    priority: 5,
+  };
+}
+
+// ── RULE 11: Er-expletive Subject ────────────────────────────
+//
+// When 'er' functions as an expletive (impersonal) subject
+// at the start of a sentence, the finite verb must be in position 2.
+//
+export function ruleErExpletive(sentence: ParsedSentence): RuleResult {
+  const mc = sentence.mainClauseTokens;
+
+  if (mc.length === 0 || mc[0].lower !== "er") {
+    return {
+      ruleName: "Er-expletive",
+      ruleId: "er_expletive",
+      status: "pass",
+      message: "No er-expletive construction detected.",
+      explanation: "",
+      priority: 5,
+    };
+  }
+
+  const verbLocalIdx = mc.findIndex((t) => t.isFiniteVerb);
+
+  if (verbLocalIdx === 1) {
+    return {
+      ruleName: "Er-expletive",
+      ruleId: "er_expletive",
+      status: "pass",
+      message: "Er-expletive construction: finite verb correctly in position 2.",
+      explanation: "In an impersonal 'er' construction, the finite verb is correctly placed in position 2.",
+      priority: 5,
+    };
+  }
+
+  if (verbLocalIdx === -1) {
+    return {
+      ruleName: "Er-expletive",
+      ruleId: "er_expletive",
+      status: "warning",
+      message: "Er-expletive detected but no finite verb found.",
+      explanation: "An 'er' at the start may introduce an impersonal construction — a finite verb should follow.",
+      priority: 4,
+    };
+  }
+
+  return {
+    ruleName: "Er-expletive",
+    ruleId: "er_expletive",
+    status: "warning",
+    message: `In an er-expletive construction, the finite verb should be in position 2. '${mc[verbLocalIdx].surface}' is in position ${verbLocalIdx + 1}.`,
+    explanation: "When 'er' functions as an expletive subject (impersonal construction like 'Er werkt een man hier'), the finite verb must follow directly in position 2.",
+    priority: 3,
+  };
+}
+
 export const ALL_RULES = [
   ruleV2WordOrder,
   ruleVerbConjugation,
@@ -788,4 +940,6 @@ export const ALL_RULES = [
   rulePerfectTenseWordOrder,
   ruleAuxiliarySelection,
   ruleProfessionArticleUsage,
+  ruleNegation,
+  ruleErExpletive,
 ];

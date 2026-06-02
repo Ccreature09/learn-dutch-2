@@ -72,6 +72,20 @@ export const GRAMMAR_RULE_GUIDES: GrammarRuleGuide[] = [
     details: "Predicate nouns like student, leraar, and dokter normally follow the copular verb directly.",
     example: "Ik ben leraar.",
   },
+  {
+    ruleId: "negation",
+    title: "Negation Placement",
+    summary: "In Dutch, 'niet' usually comes after the direct object and before prepositional phrases.",
+    details: "Avoid placing 'niet' immediately before the finite verb or right after the subject. The standard position is after the verb's complement: 'Ik zie hem niet' and 'Ze werkt niet hard'.",
+    example: "Ik doe het niet. / Ze gaat morgen niet.",
+  },
+  {
+    ruleId: "er_expletive",
+    title: "Er-expletive Construction",
+    summary: "When 'er' acts as an impersonal subject, the finite verb must be in position 2.",
+    details: "The expletive 'er' fills the first position and triggers V2 word order, so the finite verb must come directly after it. The real subject follows the verb.",
+    example: "Er werkt een man in dat kantoor.",
+  },
 ];
 
 const RULE_GUIDE_LOOKUP = Object.fromEntries(

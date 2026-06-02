@@ -407,4 +407,102 @@ export const VERB_METADATA: Record<string, VerbMetadata> = {
     acceptedObjectRoles: ["animate_person", "physical_object"],
     verbClass: "movement", cefrLevel: "A2", passivizable: false,
   },
+
+  // ── ICT Verbs ─────────────────────────────────────────────────
+  installeren: {
+    transitive: true, takesClauseObject: false,
+    acceptedObjectRoles: ["device", "physical_object", "abstract"],
+    verbClass: "physical", cefrLevel: "B1", passivizable: true,
+  },
+  configureren: {
+    transitive: true, takesClauseObject: false,
+    acceptedObjectRoles: ["device", "physical_object", "abstract"],
+    verbClass: "physical", cefrLevel: "B1", passivizable: true,
+  },
+  testen: {
+    transitive: true, takesClauseObject: false,
+    acceptedObjectRoles: ["device", "physical_object", "abstract", "text"],
+    verbClass: "physical", cefrLevel: "A2", passivizable: true,
+  },
+  debuggen: {
+    transitive: true, takesClauseObject: false,
+    acceptedObjectRoles: ["abstract", "device", "text"],
+    verbClass: "physical", cefrLevel: "B1", passivizable: false,
+  },
+  programmeren: {
+    transitive: true, takesClauseObject: false,
+    acceptedObjectRoles: ["abstract", "physical_object"],
+    verbClass: "creation", cefrLevel: "B1", passivizable: true,
+  },
+  uploaden: {
+    transitive: true, takesClauseObject: false,
+    acceptedObjectRoles: ["physical_object", "abstract", "text"],
+    verbClass: "physical", cefrLevel: "A2", passivizable: true,
+  },
+  downloaden: {
+    transitive: true, takesClauseObject: false,
+    acceptedObjectRoles: ["physical_object", "abstract", "text"],
+    verbClass: "physical", cefrLevel: "A2", passivizable: true,
+  },
+  opslaan: {
+    transitive: true, takesClauseObject: false,
+    acceptedObjectRoles: ["physical_object", "abstract", "text"],
+    verbClass: "physical", cefrLevel: "A2", passivizable: true,
+  },
+  verwijderen: {
+    transitive: true, takesClauseObject: false,
+    acceptedObjectRoles: ["physical_object", "abstract", "text"],
+    verbClass: "physical", cefrLevel: "A2", passivizable: true,
+  },
+  uitvoeren: {
+    transitive: true, takesClauseObject: false,
+    acceptedObjectRoles: ["abstract", "text"],
+    verbClass: "physical", cefrLevel: "B1", passivizable: true,
+  },
+  analyseren: {
+    transitive: true, takesClauseObject: false,
+    acceptedObjectRoles: ["abstract", "text", "physical_object"],
+    verbClass: "cognitive", cefrLevel: "B1", passivizable: true,
+  },
+  ontwerpen: {
+    transitive: true, takesClauseObject: false,
+    acceptedObjectRoles: ["physical_object", "abstract"],
+    verbClass: "creation", cefrLevel: "B1", passivizable: true,
+  },
+  implementeren: {
+    transitive: true, takesClauseObject: false,
+    acceptedObjectRoles: ["abstract", "physical_object"],
+    verbClass: "physical", cefrLevel: "B1", passivizable: true,
+  },
+  presenteren: {
+    transitive: true, takesClauseObject: false,
+    acceptedObjectRoles: ["abstract", "physical_object"],
+    verbClass: "communication", cefrLevel: "B1", passivizable: true,
+  },
+  samenwerken: {
+    transitive: false, takesClauseObject: false,
+    verbClass: "social", cefrLevel: "B1", passivizable: false,
+  },
+  afstuderen: {
+    transitive: false, takesClauseObject: false,
+    verbClass: "physical", cefrLevel: "B1", passivizable: false,
+  },
+  inloggen: {
+    transitive: false, takesClauseObject: false,
+    verbClass: "physical", cefrLevel: "A2", passivizable: false,
+  },
+  uitloggen: {
+    transitive: false, takesClauseObject: false,
+    verbClass: "physical", cefrLevel: "A2", passivizable: false,
+  },
+  bewerken: {
+    transitive: true, takesClauseObject: false,
+    acceptedObjectRoles: ["text", "physical_object", "abstract"],
+    verbClass: "creation", cefrLevel: "B1", passivizable: true,
+  },
+  opleveren: {
+    transitive: true, takesClauseObject: false,
+    acceptedObjectRoles: ["physical_object", "abstract"],
+    verbClass: "physical", cefrLevel: "B1", passivizable: true,
+  },
 };

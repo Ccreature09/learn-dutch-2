@@ -10,19 +10,18 @@ import { DUTCH_VOCABULARY } from "@/lib/data/vocabulary";
 // ─────────────────────────────────────────────────────────────
 // Module 3 — Flashcard Store (Zustand + localStorage)
 //
-// Count-based Spaced Repetition System (SRS).
-// Scheduling is driven by card counts, not timestamps:
+// SM-2 Spaced Repetition System (SRS).
+// Scheduling uses the SM-2 algorithm:
 //
-//   reviewInterval (default 5): how many other cards to see
-//                               before this card appears again.
-//   Correct: interval = min(interval * 2, 100)
-//   Wrong:   interval = max(2, floor(interval / 2))
+//   easeFactor (default 2.5): controls how fast intervals grow.
+//   reviewInterval: days before next review.
+//   Correct: interval = round(interval * ef), ef = min(2.5, ef + 0.1), cap 365
+//   Wrong:   interval = 1, ef = max(1.3, ef - 0.2)
 //            card re-inserted near the front of the session queue
 // ─────────────────────────────────────────────────────────────
 
-const DEFAULT_INTERVAL = 5;
-const MAX_INTERVAL = 100;
-const MIN_INTERVAL = 2;
+const DEFAULT_INTERVAL = 1;
+const DEFAULT_EASE = 2.5;
 const WRONG_REINSERT_POS = 5;
 
 function getDifficultyForVocabularyCard(frequency: "high" | "medium" | "low"): Difficulty {
@@ -51,6 +50,7 @@ function buildDefaultCards(): FlashCard[] {
       lastReviewed: null,
       nextReview: null,
       reviewInterval: DEFAULT_INTERVAL,
+      easeFactor: DEFAULT_EASE,
       isUserCreated: false,
       verbData: {
         infinitive: verb.infinitive,
@@ -66,16 +66,18 @@ function buildDefaultCards(): FlashCard[] {
     });
   }
 
+  // B10 fix: dedup on dutch word alone (first occurrence wins — typically highest frequency)
   const seenVocabIds = new Set<string>();
   for (const word of DUTCH_VOCABULARY) {
     if (word.pos === "article" || word.isObjectPronoun) {
       continue;
     }
 
-    const id = `vocab-${word.dutch}-${word.pos}-${word.english}`;
-    if (seenVocabIds.has(id)) continue;
-    seenVocabIds.add(id);
+    const dedupKey = word.dutch;
+    if (seenVocabIds.has(dedupKey)) continue;
+    seenVocabIds.add(dedupKey);
 
+    const id = `vocab-${word.dutch}-${word.pos}-${word.english}`;
     const difficulty = getDifficultyForVocabularyCard(word.frequency);
     // Show article on the front for nouns so learners see "de man" / "het huis"
     const front = word.pos === "noun" && word.gender
@@ -93,6 +95,7 @@ function buildDefaultCards(): FlashCard[] {
       lastReviewed: null,
       nextReview: null,
       reviewInterval: DEFAULT_INTERVAL,
+      easeFactor: DEFAULT_EASE,
       isUserCreated: false,
     });
   }
@@ -111,6 +114,7 @@ function buildDefaultCards(): FlashCard[] {
       lastReviewed: null,
       nextReview: null,
       reviewInterval: DEFAULT_INTERVAL,
+      easeFactor: DEFAULT_EASE,
       isUserCreated: false,
     });
   }
@@ -130,7 +134,9 @@ type PersistedSRS = {
     timesCorrect: number;
     reviewInterval: number;
     lastReviewed: number | null;
+    easeFactor: number;
   }>;
+  cycleCount: number;
 };
 
 interface FlashcardState {
@@ -140,9 +146,10 @@ interface FlashcardState {
   sessionQueue: string[];
   sessionDone: string[];
   sessionTotal: number;
+  cycleCount: number;
 
   addCard: (
-    card: Omit<FlashCard, "id" | "timesReviewed" | "timesCorrect" | "lastReviewed" | "nextReview" | "reviewInterval">,
+    card: Omit<FlashCard, "id" | "timesReviewed" | "timesCorrect" | "lastReviewed" | "nextReview" | "reviewInterval" | "easeFactor">,
   ) => void;
   removeCard: (id: string) => void;
   reviewCard: (id: string, correct: boolean) => void;
@@ -163,6 +170,7 @@ export const useFlashcardStore = create<FlashcardState>()(
       sessionQueue: [],
       sessionDone: [],
       sessionTotal: 0,
+      cycleCount: 0,
 
       addCard: (cardData) => {
         const id = `user-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -174,6 +182,7 @@ export const useFlashcardStore = create<FlashcardState>()(
           lastReviewed: null,
           nextReview: null,
           reviewInterval: DEFAULT_INTERVAL,
+          easeFactor: DEFAULT_EASE,
           isUserCreated: true,
         };
         set((s) => ({ cards: [...s.cards, newCard] }));
@@ -189,17 +198,26 @@ export const useFlashcardStore = create<FlashcardState>()(
 
       reviewCard: (id, correct) => {
         set((s) => {
+          // F1: SM-2 algorithm
           const cards = s.cards.map((c) => {
             if (c.id !== id) return c;
+            const ef = c.easeFactor ?? DEFAULT_EASE;
+            const newEf = correct
+              ? Math.min(2.5, ef + 0.1)
+              : Math.max(1.3, ef - 0.2);
+            // SM-2: first correct → 4 days; subsequent → interval × EF (cap 365)
             const newInterval = correct
-              ? Math.min(c.reviewInterval * 2, MAX_INTERVAL)
-              : Math.max(MIN_INTERVAL, Math.floor(c.reviewInterval / 2));
+              ? c.timesCorrect === 0
+                ? 4
+                : Math.min(Math.round(c.reviewInterval * ef), 365)
+              : 1;
             return {
               ...c,
               timesReviewed: c.timesReviewed + 1,
               timesCorrect: correct ? c.timesCorrect + 1 : c.timesCorrect,
               lastReviewed: Date.now(),
               reviewInterval: newInterval,
+              easeFactor: newEf,
             };
           });
 
@@ -214,14 +232,15 @@ export const useFlashcardStore = create<FlashcardState>()(
             queue.splice(pos, 0, id);
           }
 
-          // Infinite mode: when the queue empties, shuffle the done pile back in.
+          // B9: Infinite mode — when the queue empties, shuffle the done pile back in
+          // and increment cycleCount in the store (not component state).
           if (queue.length === 0 && done.length > 0) {
             const recycled = [...done];
             for (let i = recycled.length - 1; i > 0; i--) {
               const j = Math.floor(Math.random() * (i + 1));
               [recycled[i], recycled[j]] = [recycled[j], recycled[i]];
             }
-            return { cards, sessionQueue: recycled, sessionDone: [], sessionTotal: recycled.length };
+            return { cards, sessionQueue: recycled, sessionDone: [], sessionTotal: recycled.length, cycleCount: s.cycleCount + 1 };
           }
 
           return { cards, sessionQueue: queue, sessionDone: done };
@@ -271,6 +290,7 @@ export const useFlashcardStore = create<FlashcardState>()(
                   lastReviewed: null,
                   nextReview: null,
                   reviewInterval: DEFAULT_INTERVAL,
+                  easeFactor: DEFAULT_EASE,
                 }
               : c,
           ),
@@ -278,7 +298,7 @@ export const useFlashcardStore = create<FlashcardState>()(
       },
 
       resetAll: () => {
-        set({ cards: buildDefaultCards(), sessionQueue: [], sessionDone: [], sessionTotal: 0 });
+        set({ cards: buildDefaultCards(), sessionQueue: [], sessionDone: [], sessionTotal: 0, cycleCount: 0 });
       },
 
       getCardById: (id) => get().cards.find((c) => c.id === id),
@@ -300,10 +320,10 @@ export const useFlashcardStore = create<FlashcardState>()(
       },
     }),
     {
-      // Key bumped to v3 — clears the old full-cards snapshot from localStorage.
+      // Key bumped to v4 — clears the old full-cards snapshot from localStorage.
       // Going forward only SRS progress is persisted; the deck is rebuilt from
       // source on every load and the saved progress is merged back in.
-      name: "dutch-flashcards-v3",
+      name: "dutch-flashcards-v4",
       partialize: (s): PersistedSRS => ({
         srs: Object.fromEntries(
           s.cards.map((c) => [
@@ -313,17 +333,21 @@ export const useFlashcardStore = create<FlashcardState>()(
               timesCorrect:  c.timesCorrect,
               reviewInterval: c.reviewInterval,
               lastReviewed:  c.lastReviewed,
+              easeFactor:    c.easeFactor ?? DEFAULT_EASE,
             },
           ])
         ),
+        cycleCount: s.cycleCount,
       }),
       merge: (persisted, current) => {
-        const srs = ((persisted as PersistedSRS | null)?.srs) ?? {};
+        const p = (persisted as PersistedSRS | null);
+        const srs = p?.srs ?? {};
         const cards = buildDefaultCards().map((c) => {
-          const p = srs[c.id];
-          return p ? { ...c, ...p } : c;
+          const saved = srs[c.id];
+          if (!saved) return c;
+          return { ...c, ...saved, easeFactor: saved.easeFactor ?? DEFAULT_EASE };
         });
-        return { ...(current as FlashcardState), cards };
+        return { ...(current as FlashcardState), cards, cycleCount: p?.cycleCount ?? 0 };
       },
     },
   ),

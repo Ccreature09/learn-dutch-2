@@ -150,6 +150,8 @@ export default function TranslationDrill() {
   const [streak, setStreak] = useState(0);
   const [sessionTotal, setSessionTotal] = useState(0);
   const [sessionCorrect, setSessionCorrect] = useState(0);
+  const [milestoneBanner, setMilestoneBanner] = useState<string | null>(null);
+  const [showSessionSummary, setShowSessionSummary] = useState(false);
 
   const next = useCallback(() => {
     const weakPatterns = useLearnerStore.getState().getWeakPatterns(3);
@@ -184,11 +186,20 @@ export default function TranslationDrill() {
     }
 
     setResult(res);
-    setSessionTotal((t) => t + 1);
+    const newTotal = sessionTotal + 1;
+    setSessionTotal(newTotal);
     recordAttempt(sentence.pattern);
     if (res.isCorrect) {
-      setStreak((s) => s + 1);
+      const newStreak = streak + 1;
+      setStreak(newStreak);
       setSessionCorrect((c) => c + 1);
+
+      // F4: milestone banners at 5, 10, 20
+      if (newStreak === 5 || newStreak === 10 || newStreak === 20) {
+        const msg = newStreak === 20 ? "🔥🔥🔥 Incredible! 20 streak!" : newStreak === 10 ? "🔥🔥 Amazing! 10 streak!" : "🔥 Nice! 5 streak!";
+        setMilestoneBanner(msg);
+        setTimeout(() => setMilestoneBanner(null), 2000);
+      }
     } else {
       setStreak(0);
       const errorCats = classifyRuleFailures(res.ruleResults);
@@ -200,6 +211,11 @@ export default function TranslationDrill() {
         userInput: userAnswer,
         correctAnswer: res.modelAnswer,
       });
+    }
+
+    // F4: session summary after 10 answered sentences
+    if (newTotal === 10) {
+      setShowSessionSummary(true);
     }
   }
 
@@ -220,6 +236,28 @@ export default function TranslationDrill() {
 
   return (
     <div className="translation-drill">
+      {/* F4: Milestone banner */}
+      {milestoneBanner && (
+        <div className="streak-banner" aria-live="polite">{milestoneBanner}</div>
+      )}
+
+      {/* F4: Session summary after 10 answers */}
+      {showSessionSummary && (
+        <div className="session-summary" role="dialog" aria-labelledby="summary-title">
+          <h3 id="summary-title" className="session-summary__title">Session checkpoint</h3>
+          <p className="session-summary__stat">
+            {sessionCorrect} / {sessionTotal} correct ({Math.round((sessionCorrect / sessionTotal) * 100)}%)
+          </p>
+          <p className="session-summary__streak">Current streak: {streak}</p>
+          <button
+            className="btn btn--primary session-summary__continue"
+            onClick={() => setShowSessionSummary(false)}
+          >
+            Continue
+          </button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="drill-header">
         <h2 className="drill-title">Translation Drill</h2>
@@ -229,7 +267,7 @@ export default function TranslationDrill() {
               <span className="drill-stat">
                 {sessionCorrect}/{sessionTotal} correct ({accuracy}%)
               </span>
-              {streak > 1 && (
+              {streak >= 3 && (
                 <span className="drill-stat drill-stat--streak">🔥 {streak} streak</span>
               )}
             </>

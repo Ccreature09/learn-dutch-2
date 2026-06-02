@@ -8,7 +8,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { SENTENCE_TEMPLATES } from "@/lib/data/sentences";
-import { VOCAB_LOOKUP } from "@/lib/data/vocabulary";
+import { VOCAB_LOOKUP, DUTCH_VOCABULARY } from "@/lib/data/vocabulary";
 import { VERB_FORM_LOOKUP } from "@/lib/data/verbs";
 
 export interface TranslationResult {
@@ -160,8 +160,10 @@ function buildEnglishToNLGloss(english: string): {
   const reverseVocab: Record<string, string> = {};
   const reversePriority: Record<string, number> = {};
 
-  // Simple priority: prefer shorter, higher-frequency Dutch words
-  Object.entries(VOCAB_LOOKUP).forEach(([dutch, entry]) => {
+  // B11 fix: iterate DUTCH_VOCABULARY directly (not VOCAB_LOOKUP which is deduped by Dutch key)
+  // so all English→Dutch mappings are captured, not just those that survive deduplication.
+  DUTCH_VOCABULARY.forEach((entry) => {
+    const dutch = entry.dutch;
     const engWords = entry.english.toLowerCase().split(" / ");
     const entryPriority = (entry.frequency === "high" ? 3 : entry.frequency === "medium" ? 2 : 1);
     engWords.forEach((e) => {

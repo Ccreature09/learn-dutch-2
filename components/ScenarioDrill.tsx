@@ -150,6 +150,34 @@ function CompleteScreen({
   const total   = results.length;
   const pct     = Math.round((correct / total) * 100);
 
+  // F5: Export results as plain-text file
+  function handleExport() {
+    const lines: string[] = [
+      `Scenario: ${scenario.title}`,
+      `Score: ${correct}/${total} (${pct}%)`,
+      "",
+    ];
+    scenario.steps.forEach((step, i) => {
+      const r = results[i];
+      lines.push(`Step ${i + 1}: ${step.contextEN}`);
+      lines.push(`  English: ${step.sentence.english}`);
+      lines.push(`  Correct Dutch: ${step.sentence.dutch}`);
+      lines.push(`  Result: ${r?.isCorrect ? "✓ Correct" : "✗ Incorrect"}`);
+      if (r && !r.isCorrect && r.feedback) {
+        lines.push(`  Feedback: ${r.feedback}`);
+      }
+      lines.push("");
+    });
+
+    const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `scenario-results-${scenario.title.toLowerCase().replace(/\s+/g, "-")}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div className="scenario-complete">
       <div className="scenario-complete-emoji">{scenario.emoji}</div>
@@ -172,6 +200,7 @@ function CompleteScreen({
       <div className="scenario-complete-actions">
         <button className="btn btn--primary" onClick={onRestart}>Try Again</button>
         <button className="btn btn--ghost" onClick={onBack}>Choose Scenario</button>
+        <button className="btn btn--ghost" onClick={handleExport}>Export Results</button>
       </div>
     </div>
   );
